@@ -1,0 +1,361 @@
+{
+  "name": "RESEARCH AGENT",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        160,
+        -80
+      ],
+      "id": "efef1a84-5022-4272-9363-80312e8385a3",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "16rVh0bY16qvW_mLgu_Va94QqH13m7V0I8X6vMfOqpc8",
+          "mode": "list",
+          "cachedResultName": "Clinic",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16rVh0bY16qvW_mLgu_Va94QqH13m7V0I8X6vMfOqpc8/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1867512762,
+          "mode": "list",
+          "cachedResultName": "Lead List",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16rVh0bY16qvW_mLgu_Va94QqH13m7V0I8X6vMfOqpc8/edit#gid=1867512762"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        368,
+        -80
+      ],
+      "id": "790b7261-599a-46d3-8d2c-826c1e5d57f8",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "lq9CRq4GUdAU31Vf",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        576,
+        -80
+      ],
+      "id": "952e56de-5b95-47ce-ae55-95a6e9009689",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agent.tinyfish.ai/v1/automation/run-sse",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ 'https://' + $json['Website URL'] }}"
+            },
+            {
+              "name": "goal",
+              "value": "Visit this clinic website and do the following:\n\n1. READ: Home page, About Us, Services, Contact, and Booking pages.\n\n2. EXTRACT:\n- Clinic name and short summary\n- List of services offered\n- Founder or lead doctor name\n- Contact email address\n- Contact phone number\n- Current booking method (phone, online form, Calendly, none)\n\n3. IDENTIFY PAIN POINTS:\n- No online booking (only phone)\n- No chatbot or live chat\n- Generic contact form only\n- Missed call or voicemail indication\n- No email follow-up automation\n\n4. DRAFT a cold outreach email:\n\nSubject: [specific to their pain point]\n\nHi [Founder name or Team],\n\nI noticed [specific thing about their clinic].\n\nMany clinics in Australia are losing 20-30% of appointments due to missed calls and manual booking. We built an AI Calling Agent that:\n- Answers missed calls 24/7 automatically\n- Books appointments into your calendar\n- Sends confirmation emails to patients instantly\n\nWould you be open to a 10-minute call this week?\n\nBest,\nAyan Zeeshan\nAI Whites\n\n5. Return ONLY this JSON, nothing else:\n{\n  \"clinic_name\": \"\",\n  \"clinic_summary\": \"\",\n  \"services\": \"\",\n  \"founder_name\": \"\",\n  \"contact_email\": \"\",\n  \"contact_phone\": \"\",\n  \"booking_method\": \"\",\n  \"pain_points\": \"\",\n  \"email_subject\": \"\",\n  \"email_body\": \"\"\n}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        784,
+        128
+      ],
+      "id": "0a052440-89ac-479b-af4f-72049ea56ec0",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "XzuMXZCAsRrofkhu",
+          "name": "Header Auth account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.item.json;\n\n// SSE response text se JSON extract karo\nlet raw = body.data || body.body || '';\nif (typeof raw !== 'string') raw = JSON.stringify(raw);\n\n// Last 'data:' line dhundo jisme JSON ho\nlet parsed = {};\ntry {\n  const lines = raw.split('\\n').reverse();\n  for (const line of lines) {\n    const trimmed = line.trim();\n    if (trimmed.startsWith('data:')) {\n      const jsonStr = trimmed.replace('data:', '').trim();\n      if (jsonStr && jsonStr !== '[DONE]') {\n        const obj = JSON.parse(jsonStr);\n        if (obj.result || obj.output || obj.clinic_name) {\n          parsed = obj.result || obj.output || obj;\n          break;\n        }\n      }\n    }\n  }\n  // Agar direct JSON mila to\n  if (!parsed.clinic_name) {\n    const match = raw.match(/\\{[\\s\\S]*\\\"clinic_name\\\"[\\s\\S]*\\}/);\n    if (match) parsed = JSON.parse(match[0]);\n  }\n} catch(e) {\n  parsed = { error: 'parse_failed', raw: raw.substring(0, 500) };\n}\n\nreturn {\n  json: {\n    clinic_name:    parsed.clinic_name || '',\n    clinic_summary: parsed.clinic_summary || '',\n    services:       parsed.services || '',\n    founder_name:   parsed.founder_name || '',\n    contact_email:  parsed.contact_email || '',\n    contact_phone:  parsed.contact_phone || '',\n    booking_method: parsed.booking_method || '',\n    pain_points:    parsed.pain_points || '',\n    email_subject:  parsed.email_subject || '',\n    email_body:     parsed.email_body || '',\n    source_url:     $('Loop Over Items').item.json['Website URL'] || ''\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        128
+      ],
+      "id": "960cd35c-00c7-4432-abfe-704a1ddf4760",
+      "name": "Parse JSON"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1DSvVjvhfhV4J7JfWYD9Pw68iRQTsbWRGUogH_pMJDT0",
+          "mode": "list",
+          "cachedResultName": "Clinic",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1DSvVjvhfhV4J7JfWYD9Pw68iRQTsbWRGUogH_pMJDT0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1DSvVjvhfhV4J7JfWYD9Pw68iRQTsbWRGUogH_pMJDT0/edit?gid=743910134#gid=743910134",
+          "mode": "url"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Clinic Name": "={{ $json.clinic_name }}",
+            "Clinic Summary": "={{ $json.clinic_summary }}",
+            "Services Offered": "={{ $json.services }}",
+            "Founder / Doctor Name": "={{ $json.founder_name }}",
+            "Contact Email": "={{ $json.contact_email }}",
+            "Contact Phone": "={{ $json.contact_phone }}",
+            "Booking Method Found": "={{ $json.booking_method }}",
+            "Pain Points (AI Detected)": "={{ $json.pain_points }}",
+            "Email Subject Line": "={{ $json.email_subject }}",
+            "Email Body (Draft)": "={{ $json.email_body }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Clinic Name",
+              "displayName": "Clinic Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Website URL",
+              "displayName": "Website URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Clinic Summary",
+              "displayName": "Clinic Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Services Offered",
+              "displayName": "Services Offered",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Founder / Doctor Name",
+              "displayName": "Founder / Doctor Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Contact Email",
+              "displayName": "Contact Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Contact Phone",
+              "displayName": "Contact Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Booking Method Found",
+              "displayName": "Booking Method Found",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Pain Points (AI Detected)",
+              "displayName": "Pain Points (AI Detected)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Subject Line",
+              "displayName": "Email Subject Line",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Body (Draft)",
+              "displayName": "Email Body (Draft)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Follow-up Notes",
+              "displayName": "Follow-up Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1200,
+        128
+      ],
+      "id": "99d53f35-8a82-4799-b14b-d565439a192b",
+      "name": "Append to Agent Output",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "lq9CRq4GUdAU31Vf",
+          "name": "Google Sheets account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Parse JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse JSON": {
+      "main": [
+        [
+          {
+            "node": "Append to Agent Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append to Agent Output": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "88c2bd35-5db5-4e4c-b8b3-8f02c1533141",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "047c3821bd86e3e7fe4f8433ed22b2c2ef6727f625483d9cb479d0e41c7ea84e"
+  },
+  "nodeGroups": [],
+  "id": "1KyRwza8jrYuJMe1",
+  "tags": []
+}
